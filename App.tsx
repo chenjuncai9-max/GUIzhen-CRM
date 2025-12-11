@@ -3,7 +3,6 @@ import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import Inventory from './components/Inventory';
 import Orders from './components/Orders';
-import AIAssistant from './components/AIAssistant';
 import Customers from './components/Customers';
 import Finance from './components/Finance';
 import Settings from './components/Settings';
@@ -62,8 +61,6 @@ const App: React.FC = () => {
         return <Customers customers={customers} onUpdate={refreshAllData} />;
       case 'finance':
         return <Finance financeRecords={financeRecords} transactions={transactions} onUpdate={refreshAllData} />;
-      case 'ai-insight':
-        return <AIAssistant products={products} transactions={transactions} />;
       case 'settings':
         return <Settings onDataRestored={refreshAllData} />;
       default:

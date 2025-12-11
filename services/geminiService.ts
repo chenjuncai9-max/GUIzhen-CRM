@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { Product, Transaction, TransactionType } from '../types';
+import { Product, Transaction, TransactionType, AIAnalysisResult } from '../types';
 
 const getClient = () => {
   const apiKey = process.env.API_KEY;
@@ -11,7 +11,7 @@ const getClient = () => {
 };
 
 export const GeminiService = {
-  analyzeBusiness: async (products: Product[], transactions: Transaction[]) => {
+  analyzeBusiness: async (products: Product[], transactions: Transaction[]): Promise<AIAnalysisResult> => {
     const ai = getClient();
     if (!ai) return { summary: "无法连接AI服务 (缺少API Key)", suggestions: [] };
 
@@ -50,7 +50,7 @@ export const GeminiService = {
       });
       
       const text = response.text || "{}";
-      return JSON.parse(text);
+      return JSON.parse(text) as AIAnalysisResult;
     } catch (error) {
       console.error("Gemini Analysis Error:", error);
       return {

@@ -14,7 +14,6 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
     { id: 'purchase', label: '采购入库', icon: ShoppingCart },
     { id: 'customers', label: '客户/核销', icon: Users },
     { id: 'finance', label: '财务报表', icon: Wallet },
-    { id: 'ai-insight', label: '智能分析', icon: Sparkles },
   ];
 
   return (
