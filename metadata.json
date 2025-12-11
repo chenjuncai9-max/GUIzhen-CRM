@@ -1,5 +1,5 @@
 {
-  "name": "贵蓁供销存",
+  "name": "贵蓁供销存 CRM",
   "description": "一个智能供销存管理系统，提供库存管理、销售采购记录及财务分析报表。",
   "requestFramePermissions": [
     "camera"
