@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Product, ProductType } from '../types';
-import { Search, Plus, Edit2, Trash2, AlertCircle, Package, CreditCard, CalendarClock, Download, ScanBarcode, X } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, AlertCircle, Package, CreditCard, CalendarClock, Download, ScanBarcode, X, Filter, AlertTriangle } from 'lucide-react';
 import { exportToCSV } from '../utils/csvExport';
 // @ts-ignore
 import { Html5Qrcode } from "html5-qrcode";
@@ -9,12 +9,19 @@ interface InventoryProps {
   products: Product[];
   onAddProduct: (p: Product) => void;
   onDeleteProduct: (id: string) => void;
+  initialFilter?: 'ALL' | 'LOW_STOCK';
 }
 
-const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteProduct }) => {
+const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteProduct, initialFilter = 'ALL' }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [filterType, setFilterType] = useState<'ALL' | 'LOW_STOCK'>(initialFilter);
+
+  // Sync filter if changed from parent (e.g. Dashboard navigation)
+  useEffect(() => {
+    setFilterType(initialFilter);
+  }, [initialFilter]);
 
   // Scanner state
   const [isScanning, setIsScanning] = useState(false);
@@ -25,10 +32,20 @@ const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteP
     name: '', category: '', sku: '', price: 0, cost: 0, stock: 0, minStockLevel: 5, type: ProductType.GOODS, value: 0
   });
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.sku.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProducts = products.filter(p => {
+    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    p.sku.toLowerCase().includes(searchTerm.toLowerCase());
+
+    if (!matchesSearch) return false;
+
+    if (filterType === 'LOW_STOCK') {
+       return p.type === ProductType.GOODS && p.stock <= p.minStockLevel;
+    }
+
+    return true;
+  });
+
+  const lowStockCount = products.filter(p => p.type === ProductType.GOODS && p.stock <= p.minStockLevel).length;
 
   const handleExport = () => {
       const dataToExport = filteredProducts.map(p => ({
@@ -177,19 +194,38 @@ const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteP
 
   return (
     <div className="space-y-4 md:space-y-6">
-      <div className="flex flex-row justify-between items-center gap-4">
-        <h2 className="text-xl md:text-2xl font-bold text-slate-800">商品与服务</h2>
-        <div className="flex space-x-2">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+           <h2 className="text-xl md:text-2xl font-bold text-slate-800">商品与服务</h2>
+           <div className="flex space-x-2 mt-2">
+              <button 
+                onClick={() => setFilterType('ALL')}
+                className={`px-3 py-1 text-sm rounded-full border transition-colors ${filterType === 'ALL' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+              >
+                全部商品
+              </button>
+              <button 
+                onClick={() => setFilterType('LOW_STOCK')}
+                className={`px-3 py-1 text-sm rounded-full border flex items-center space-x-1 transition-colors ${filterType === 'LOW_STOCK' ? 'bg-amber-100 text-amber-800 border-amber-200 ring-1 ring-amber-300' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+              >
+                <AlertTriangle size={12} className={filterType === 'LOW_STOCK' ? 'text-amber-600' : 'text-slate-400'}/>
+                <span>库存预警</span>
+                {lowStockCount > 0 && <span className="ml-1 bg-amber-500 text-white text-[10px] px-1.5 rounded-full">{lowStockCount}</span>}
+              </button>
+           </div>
+        </div>
+        
+        <div className="flex space-x-2 w-full md:w-auto">
             <button 
                 onClick={handleExport}
-                className="flex items-center space-x-1 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-2 rounded-lg transition-colors text-sm md:text-base shadow-sm"
+                className="flex-1 md:flex-none flex items-center justify-center space-x-1 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-2 rounded-lg transition-colors text-sm md:text-base shadow-sm"
             >
                 <Download size={18} />
                 <span className="hidden md:inline">导出</span>
             </button>
             <button 
             onClick={() => openModal()}
-            className="flex items-center space-x-1 md:space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 md:px-4 rounded-lg transition-colors text-sm md:text-base shadow-sm"
+            className="flex-1 md:flex-none flex items-center justify-center space-x-1 md:space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 md:px-4 rounded-lg transition-colors text-sm md:text-base shadow-sm"
             >
             <Plus size={18} />
             <span>新增</span>
@@ -203,7 +239,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteP
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
-            placeholder="搜索商品..." 
+            placeholder="搜索商品名称或条码..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
@@ -256,6 +292,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteP
             </div>
           </div>
         ))}
+        {filteredProducts.length === 0 && (
+            <div className="text-center py-10 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                <Package size={32} className="mx-auto mb-2 opacity-50"/>
+                <p>暂无符合条件的商品</p>
+            </div>
+        )}
       </div>
 
       {/* Desktop Table View */}
@@ -284,7 +326,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteP
                 <td className="px-6 py-4 text-right text-slate-600">¥{product.cost}</td>
                 <td className="px-6 py-4 text-right font-medium text-slate-800">¥{product.price}</td>
                 <td className="px-6 py-4 text-center">
-                    {product.type === ProductType.GOODS ? product.stock : '-'}
+                    {product.type === ProductType.GOODS ? (
+                        <span className={product.stock <= product.minStockLevel ? 'text-red-600 font-bold' : ''}>
+                            {product.stock}
+                        </span>
+                    ) : '-'}
                 </td>
                 <td className="px-6 py-4 text-center">
                    <div className="flex justify-center space-x-2">
@@ -294,6 +340,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteP
                 </td>
               </tr>
             ))}
+             {filteredProducts.length === 0 && (
+                <tr>
+                    <td colSpan={6} className="text-center py-10 text-slate-400">
+                        <Package size={24} className="mx-auto mb-2 opacity-50"/>
+                        暂无符合条件的商品
+                    </td>
+                </tr>
+            )}
           </tbody>
         </table>
       </div>

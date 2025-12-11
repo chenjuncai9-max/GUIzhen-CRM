@@ -17,6 +17,8 @@ const Finance: React.FC<FinanceProps> = ({ financeRecords, transactions, onUpdat
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('房租');
   const [type, setType] = useState<'EXPENSE' | 'INCOME'>('EXPENSE');
+  // Initialize with today's date in YYYY-MM-DD format
+  const [recordDate, setRecordDate] = useState(new Date().toISOString().split('T')[0]);
 
   // --- Calculations ---
   const financialStats = useMemo(() => {
@@ -43,7 +45,7 @@ const Finance: React.FC<FinanceProps> = ({ financeRecords, transactions, onUpdat
       
       const newRecord: FinanceRecord = {
           id: Date.now().toString(),
-          date: new Date().toISOString(),
+          date: new Date(recordDate).toISOString(),
           type: type,
           amount: Number(amount),
           category: category,
@@ -53,6 +55,8 @@ const Finance: React.FC<FinanceProps> = ({ financeRecords, transactions, onUpdat
       onUpdate();
       setAmount('');
       setDescription('');
+      // Reset date to today after submit
+      setRecordDate(new Date().toISOString().split('T')[0]);
   };
 
   const handleDelete = (id: string) => {
@@ -166,6 +170,10 @@ const Finance: React.FC<FinanceProps> = ({ financeRecords, transactions, onUpdat
                           <div className="flex gap-2 mb-2">
                               <button type="button" onClick={() => setType('EXPENSE')} className={`flex-1 py-2 text-sm rounded-lg border ${type === 'EXPENSE' ? 'bg-red-50 border-red-200 text-red-600 font-bold' : 'border-slate-200 text-slate-500'}`}>支出</button>
                               <button type="button" onClick={() => setType('INCOME')} className={`flex-1 py-2 text-sm rounded-lg border ${type === 'INCOME' ? 'bg-green-50 border-green-200 text-green-600 font-bold' : 'border-slate-200 text-slate-500'}`}>其他收入</button>
+                          </div>
+                          <div>
+                              <label className="block text-sm text-slate-600 mb-1">日期</label>
+                              <input type="date" required className="w-full border rounded-lg p-2" value={recordDate} onChange={e => setRecordDate(e.target.value)} />
                           </div>
                           <div>
                               <label className="block text-sm text-slate-600 mb-1">金额</label>

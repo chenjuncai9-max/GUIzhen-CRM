@@ -6,11 +6,14 @@ import { TrendingUp, AlertTriangle, Package, DollarSign } from 'lucide-react';
 interface DashboardProps {
   products: Product[];
   transactions: Transaction[];
-  onNavigate: (tab: string) => void;
+  onNavigate: (tab: string, params?: any) => void;
 }
 
-const StatCard = ({ title, value, subtext, icon: Icon, colorClass }: any) => (
-  <div className="bg-white p-5 md:p-6 rounded-xl shadow-sm border border-slate-100 flex items-start justify-between">
+const StatCard = ({ title, value, subtext, icon: Icon, colorClass, onClick }: any) => (
+  <div 
+    onClick={onClick} 
+    className={`bg-white p-5 md:p-6 rounded-xl shadow-sm border border-slate-100 flex items-start justify-between ${onClick ? 'cursor-pointer hover:shadow-md transition-all active:scale-95' : ''}`}
+  >
     <div>
       <p className="text-slate-500 text-xs md:text-sm font-medium mb-1">{title}</p>
       <h3 className="text-xl md:text-2xl font-bold text-slate-800">{value}</h3>
@@ -69,6 +72,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products, transactions, onNavigat
           subtext="+12% 较上周"
           icon={DollarSign}
           colorClass="text-emerald-600 bg-emerald-100"
+          onClick={() => onNavigate('sales')}
         />
         <StatCard 
           title="库存预警" 
@@ -76,6 +80,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products, transactions, onNavigat
           subtext={stats.lowStock > 0 ? "需尽快补货" : "库存充足"}
           icon={AlertTriangle}
           colorClass="text-amber-600 bg-amber-100"
+          onClick={() => onNavigate('inventory', { filter: 'LOW_STOCK' })}
         />
         <StatCard 
           title="库存总成本" 
@@ -90,6 +95,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products, transactions, onNavigat
           subtext="SKU 数量"
           icon={TrendingUp}
           colorClass="text-purple-600 bg-purple-100"
+          onClick={() => onNavigate('inventory', { filter: 'ALL' })}
         />
       </div>
 
@@ -124,7 +130,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products, transactions, onNavigat
                   <h4 className="text-red-800 font-semibold text-sm">库存不足提醒</h4>
                   <p className="text-red-600 text-xs mt-1">有 {stats.lowStock} 个商品低于安全库存线。</p>
                   <button 
-                    onClick={() => onNavigate('purchase')}
+                    onClick={() => onNavigate('inventory', { filter: 'LOW_STOCK' })}
                     className="mt-2 text-xs font-medium text-red-700 hover:underline"
                   >
                     去采购补货 &rarr;

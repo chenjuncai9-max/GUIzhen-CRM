@@ -1,6 +1,7 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { StorageService } from '../services/storage';
-import { Download, Upload, AlertTriangle, Save, RefreshCw } from 'lucide-react';
+import { Download, Upload, AlertTriangle, Save, RefreshCw, Smartphone, ArrowRightLeft } from 'lucide-react';
+import DataSync from './DataSync';
 
 interface SettingsProps {
   onDataRestored: () => void;
@@ -8,6 +9,7 @@ interface SettingsProps {
 
 const Settings: React.FC<SettingsProps> = ({ onDataRestored }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showSyncModal, setShowSyncModal] = useState(false);
 
   const handleBackup = () => {
     const data = StorageService.getAllData();
@@ -55,8 +57,30 @@ const Settings: React.FC<SettingsProps> = ({ onDataRestored }) => {
     <div className="space-y-6 animate-fade-in max-w-2xl mx-auto pt-4 md:pt-0">
       <header className="mb-6 md:mb-8">
         <h2 className="text-xl md:text-2xl font-bold text-slate-800">系统设置</h2>
-        <p className="text-sm md:text-base text-slate-500">管理数据备份与恢复</p>
+        <p className="text-sm md:text-base text-slate-500">管理数据备份与同步</p>
       </header>
+
+      {/* New Sync Section */}
+      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl shadow-lg text-white overflow-hidden mb-6">
+         <div className="p-6">
+            <div className="flex items-center space-x-3 mb-3">
+               <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+                  <Smartphone size={24} className="text-white" />
+               </div>
+               <h3 className="text-lg font-bold">多设备数据同步</h3>
+            </div>
+            <p className="text-indigo-100 text-sm mb-6 leading-relaxed opacity-90">
+               换手机或想在电脑上使用？使用此功能可以快速将当前数据直接传输到新设备，无需下载文件。
+            </p>
+            <button 
+              onClick={() => setShowSyncModal(true)}
+              className="w-full bg-white text-indigo-600 font-bold py-3 rounded-lg shadow-sm hover:bg-indigo-50 transition-colors flex items-center justify-center space-x-2"
+            >
+               <ArrowRightLeft size={18} />
+               <span>开始同步数据</span>
+            </button>
+         </div>
+      </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-6 border-b border-slate-100">
@@ -64,7 +88,7 @@ const Settings: React.FC<SettingsProps> = ({ onDataRestored }) => {
              <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
                <Save size={20} />
              </div>
-             <h3 className="text-lg font-bold text-slate-800">数据备份</h3>
+             <h3 className="text-lg font-bold text-slate-800">本地文件备份</h3>
            </div>
            <p className="text-slate-500 text-sm mb-6 leading-relaxed">
              将当前系统中的所有商品、交易、客户及财务数据打包下载为 JSON 文件。
@@ -72,7 +96,7 @@ const Settings: React.FC<SettingsProps> = ({ onDataRestored }) => {
            </p>
            <button 
              onClick={handleBackup}
-             className="w-full md:w-auto flex items-center justify-center space-x-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors shadow-sm"
+             className="w-full md:w-auto flex items-center justify-center space-x-2 px-6 py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg font-medium transition-colors shadow-sm"
            >
              <Download size={18} />
              <span>下载备份文件</span>
@@ -84,7 +108,7 @@ const Settings: React.FC<SettingsProps> = ({ onDataRestored }) => {
              <div className="p-2 bg-amber-100 text-amber-600 rounded-lg">
                <RefreshCw size={20} />
              </div>
-             <h3 className="text-lg font-bold text-slate-800">数据恢复</h3>
+             <h3 className="text-lg font-bold text-slate-800">文件恢复</h3>
            </div>
            <p className="text-slate-500 text-sm mb-4 leading-relaxed">
              上传之前的备份文件以恢复数据。
@@ -114,9 +138,11 @@ const Settings: React.FC<SettingsProps> = ({ onDataRestored }) => {
       </div>
       
       <div className="text-center text-slate-400 text-xs mt-12 pb-8">
-        <p>贵蓁供销存 v1.1.0</p>
+        <p>贵蓁供销存 v1.2.0</p>
         <p className="mt-1 opacity-60">本地数据存储模式</p>
       </div>
+
+      {showSyncModal && <DataSync onClose={() => setShowSyncModal(false)} onSyncComplete={onDataRestored} />}
     </div>
   );
 };

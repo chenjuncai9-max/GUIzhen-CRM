@@ -16,6 +16,9 @@ const App: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
+  
+  // State for handling inventory filtering from dashboard
+  const [inventoryFilter, setInventoryFilter] = useState<'ALL' | 'LOW_STOCK'>('ALL');
 
   // Load initial data
   useEffect(() => {
@@ -47,12 +50,20 @@ const App: React.FC = () => {
     refreshAllData();
   };
 
+  const handleNavigate = (tab: string, params?: any) => {
+      setActiveTab(tab);
+      if (tab === 'inventory') {
+          if (params?.filter) setInventoryFilter(params.filter);
+          else setInventoryFilter('ALL');
+      }
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard products={products} transactions={transactions} onNavigate={setActiveTab} />;
+        return <Dashboard products={products} transactions={transactions} onNavigate={handleNavigate} />;
       case 'inventory':
-        return <Inventory products={products} onAddProduct={handleAddProduct} onDeleteProduct={handleDeleteProduct} />;
+        return <Inventory products={products} onAddProduct={handleAddProduct} onDeleteProduct={handleDeleteProduct} initialFilter={inventoryFilter} />;
       case 'sales':
         return <Orders type={TransactionType.SALE} products={products} transactions={transactions} customers={customers} onSubmitOrder={handleOrder} />;
       case 'purchase':
@@ -64,7 +75,7 @@ const App: React.FC = () => {
       case 'settings':
         return <Settings onDataRestored={refreshAllData} />;
       default:
-        return <Dashboard products={products} transactions={transactions} onNavigate={setActiveTab} />;
+        return <Dashboard products={products} transactions={transactions} onNavigate={handleNavigate} />;
     }
   };
 
@@ -79,7 +90,7 @@ const App: React.FC = () => {
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
       {/* Sidebar for Desktop */}
-      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
+      <Sidebar activeTab={activeTab} onTabChange={(tab) => handleNavigate(tab)} />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
@@ -127,7 +138,7 @@ const App: React.FC = () => {
           {navItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => handleNavigate(item.id)}
               className={`flex flex-col items-center justify-center w-full py-1 space-y-1 transition-colors duration-200 ${
                 activeTab === item.id ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'
               }`}
