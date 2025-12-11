@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { registerSW } from 'virtual:pwa-register';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -13,3 +14,10 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+// register service worker for PWA (auto update)
+try {
+  registerSW({ immediate: true });
+} catch (e) {
+  // noop if virtual module not available in some environments
+}
