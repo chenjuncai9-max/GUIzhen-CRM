@@ -1,0 +1,7 @@
+{
+  "name": "贵蓁供销存",
+  "description": "一个基于AI的智能供销存管理系统，提供库存管理、销售采购记录以及Gemini驱动的商业智能分析。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
