@@ -1,22 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Product, ProductType } from '../types';
-import { Search, Plus, Edit2, Trash2, AlertCircle, Package, CreditCard, CalendarClock, Download, ScanBarcode, X, Filter, AlertTriangle } from 'lucide-react';
-import { exportToCSV } from '../utils/csvExport';
+import { Search, Plus, Edit2, Trash2, AlertCircle, Package, CreditCard, CalendarClock, Download, ScanBarcode, X, Filter, AlertTriangle, Upload } from 'lucide-react';
+import { exportToCSV, parseCSV } from '../utils/csvExport';
 // @ts-ignore
 import { Html5Qrcode } from "html5-qrcode";
 
 interface InventoryProps {
   products: Product[];
   onAddProduct: (p: Product) => void;
+  onBatchAddProduct: (products: Product[]) => void;
   onDeleteProduct: (id: string) => void;
   initialFilter?: 'ALL' | 'LOW_STOCK';
 }
 
-const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteProduct, initialFilter = 'ALL' }) => {
+const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onBatchAddProduct, onDeleteProduct, initialFilter = 'ALL' }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [filterType, setFilterType] = useState<'ALL' | 'LOW_STOCK'>(initialFilter);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync filter if changed from parent (e.g. Dashboard navigation)
   useEffect(() => {
@@ -57,16 +59,62 @@ const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteP
 
       const headers = [
           { key: 'name', label: '商品名称' },
-          { key: 'typeName', label: '类型' },
           { key: 'category', label: '分类' },
           { key: 'sku', label: 'SKU' },
           { key: 'price', label: '售价' },
           { key: 'cost', label: '成本' },
-          { key: 'stockDisplay', label: '库存' },
-          { key: 'valueDisplay', label: '卡项含值(次/天)' },
+          { key: 'stock', label: '库存' },
+          { key: 'minStockLevel', label: '预警库存' },
+          { key: 'type', label: '类型(GOODS/SERVICE_COUNT/SERVICE_TIME)' },
+          { key: 'value', label: '卡项含值' },
       ];
 
       exportToCSV(dataToExport, headers, '库存列表');
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const parsed = parseCSV(text);
+        
+        if (parsed.length === 0) {
+            alert('文件为空或格式不正确');
+            return;
+        }
+
+        const newProducts: Product[] = parsed.map((row: any) => ({
+            id: Date.now().toString() + Math.random().toString().slice(2, 6),
+            name: row['商品名称'] || row['name'] || '未命名',
+            category: row['分类'] || row['category'] || '默认',
+            sku: row['SKU'] || row['sku'] || 'SKU-' + Math.random().toString().slice(2, 8),
+            price: Number(row['售价'] || row['price'] || 0),
+            cost: Number(row['成本'] || row['cost'] || 0),
+            stock: Number(row['库存'] || row['stock'] || 0),
+            minStockLevel: Number(row['预警库存'] || row['minStockLevel'] || 5),
+            type: (row['类型'] || row['type'] || 'GOODS') as ProductType, // Loose mapping
+            value: Number(row['卡项含值'] || row['value'] || 0)
+        }));
+        
+        if (confirm(`解析到 ${newProducts.length} 条数据，确定导入吗？`)) {
+            onBatchAddProduct(newProducts);
+            alert('导入成功');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('导入失败，请检查文件格式。应包含表头：商品名称,分类,SKU,售价,成本,库存...');
+      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
   };
 
   // --- Scanner Logic ---
@@ -216,6 +264,21 @@ const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onDeleteP
         </div>
         
         <div className="flex space-x-2 w-full md:w-auto">
+            <input 
+                type="file" 
+                accept=".csv"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                className="hidden"
+            />
+            <button 
+                onClick={handleImportClick}
+                className="flex-1 md:flex-none flex items-center justify-center space-x-1 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-2 rounded-lg transition-colors text-sm md:text-base shadow-sm"
+                title="导入CSV"
+            >
+                <Upload size={18} />
+                <span className="hidden md:inline">导入</span>
+            </button>
             <button 
                 onClick={handleExport}
                 className="flex-1 md:flex-none flex items-center justify-center space-x-1 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-2 rounded-lg transition-colors text-sm md:text-base shadow-sm"

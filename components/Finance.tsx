@@ -1,9 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { FinanceRecord, Transaction, TransactionType } from '../types';
 import { StorageService } from '../services/storage';
-import { Plus, Trash2, TrendingUp, TrendingDown, DollarSign, PieChart, Download } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, TrendingDown, DollarSign, PieChart, Download, Upload } from 'lucide-react';
 import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { exportToCSV } from '../utils/csvExport';
+import { exportToCSV, parseCSV } from '../utils/csvExport';
 
 interface FinanceProps {
   financeRecords: FinanceRecord[];
@@ -17,6 +17,8 @@ const Finance: React.FC<FinanceProps> = ({ financeRecords, transactions, onUpdat
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('房租');
   const [type, setType] = useState<'EXPENSE' | 'INCOME'>('EXPENSE');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   // Initialize with today's date in YYYY-MM-DD format
   const [recordDate, setRecordDate] = useState(new Date().toISOString().split('T')[0]);
 
@@ -84,6 +86,45 @@ const Finance: React.FC<FinanceProps> = ({ financeRecords, transactions, onUpdat
     ];
 
     exportToCSV(dataToExport, headers, '财务流水');
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const parsed = parseCSV(text);
+        if (parsed.length === 0) { alert('文件为空'); return; }
+
+        const newRecords: FinanceRecord[] = parsed.map((row: any) => ({
+            id: Date.now().toString() + Math.random().toString().slice(2, 6),
+            date: row['日期'] ? new Date(row['日期']).toISOString() : new Date().toISOString(),
+            type: (row['类型'] === '收入' || row['type'] === 'INCOME') ? 'INCOME' : 'EXPENSE',
+            amount: Number(row['金额'] || row['amount'] || 0),
+            category: row['分类'] || row['category'] || '其他',
+            description: row['备注'] || row['description'] || ''
+        }));
+        
+        if (confirm(`解析到 ${newRecords.length} 条记录，确定导入吗？`)) {
+            // Use Batch Save
+            StorageService.batchAddFinanceRecords(newRecords);
+            onUpdate();
+            alert('导入成功');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('导入失败，请检查文件格式。');
+      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
   };
 
   const chartData = [
@@ -203,13 +244,29 @@ const Finance: React.FC<FinanceProps> = ({ financeRecords, transactions, onUpdat
                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
                        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                           <h4 className="font-bold text-slate-700">收支明细</h4>
-                          <button 
-                            onClick={handleExport}
-                            className="p-1.5 bg-white border border-slate-200 rounded text-slate-600 hover:text-indigo-600 transition-colors"
-                            title="导出明细"
-                          >
-                            <Download size={16} />
-                          </button>
+                          <div className="flex space-x-2">
+                            <input 
+                                type="file" 
+                                accept=".csv"
+                                ref={fileInputRef}
+                                onChange={handleFileChange}
+                                className="hidden"
+                            />
+                            <button 
+                                onClick={handleImportClick}
+                                className="p-1.5 bg-white border border-slate-200 rounded text-slate-600 hover:text-indigo-600 transition-colors"
+                                title="导入CSV"
+                            >
+                                <Upload size={16} />
+                            </button>
+                            <button 
+                                onClick={handleExport}
+                                className="p-1.5 bg-white border border-slate-200 rounded text-slate-600 hover:text-indigo-600 transition-colors"
+                                title="导出明细"
+                            >
+                                <Download size={16} />
+                            </button>
+                          </div>
                        </div>
                        <div className="overflow-auto flex-1">
                         <table className="w-full text-left text-sm">

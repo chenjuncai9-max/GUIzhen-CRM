@@ -1,17 +1,19 @@
-import React, { useState, useMemo } from 'react';
-import { Customer, ProductType, CustomerCard } from '../types';
+import React, { useState, useMemo, useRef } from 'react';
+import { Customer, ProductType, CustomerCard, Transaction } from '../types';
 import { StorageService } from '../services/storage';
-import { Search, Plus, User, Phone, Edit2, Trash2, CreditCard, Clock, CheckCircle, XCircle, MinusCircle, AlertTriangle, Smartphone, UserMinus, BatteryWarning, Download } from 'lucide-react';
-import { exportToCSV } from '../utils/csvExport';
+import { Search, Plus, User, Phone, Edit2, Trash2, CreditCard, Clock, CheckCircle, XCircle, MinusCircle, AlertTriangle, Smartphone, UserMinus, BatteryWarning, Download, Upload, ShoppingBag, Calendar } from 'lucide-react';
+import { exportToCSV, parseCSV } from '../utils/csvExport';
 
 interface CustomersProps {
   customers: Customer[];
+  transactions: Transaction[];
   onUpdate: () => void;
 }
 
-const Customers: React.FC<CustomersProps> = ({ customers, onUpdate }) => {
+const Customers: React.FC<CustomersProps> = ({ customers, transactions, onUpdate }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'LOW_BALANCE' | 'DORMANT'>('ALL');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Edit Customer Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -74,6 +76,17 @@ const Customers: React.FC<CustomersProps> = ({ customers, onUpdate }) => {
       return true;
   });
 
+  // Get History for Selected Customer
+  const selectedCustomerHistory = useMemo(() => {
+      if (!selectedCustomer) return [];
+      // Filter transactions linked by ID
+      // Fallback: match by name if ID is missing (legacy data support)
+      return transactions.filter(t => 
+        (t.partyId === selectedCustomer.id) || 
+        (!t.partyId && t.partyName === selectedCustomer.name)
+      ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [selectedCustomer, transactions]);
+
   // --- Helper to check status for specific customer rendering ---
   const getCustomerStatus = (c: Customer) => {
       const isLowBalance = c.cards.some(card => 
@@ -110,6 +123,49 @@ const Customers: React.FC<CustomersProps> = ({ customers, onUpdate }) => {
       ];
 
       exportToCSV(dataToExport, headers, '客户列表');
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const parsed = parseCSV(text);
+        
+        if (parsed.length === 0) {
+            alert('文件为空或格式不正确');
+            return;
+        }
+
+        const newCustomers: Customer[] = parsed.map((row: any) => ({
+            id: Date.now().toString() + Math.random().toString().slice(2, 6),
+            name: row['客户姓名'] || row['name'] || '未知客户',
+            phone: row['手机号'] || row['phone'] || '',
+            notes: row['备注'] || row['notes'] || '',
+            cards: [],
+            lastActivity: new Date().toISOString()
+        }));
+        
+        if (confirm(`解析到 ${newCustomers.length} 条客户数据，确定导入吗？`)) {
+            // Use Batch Save
+            StorageService.batchSaveCustomers(newCustomers);
+            onUpdate();
+            alert('导入成功');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('导入失败，请检查文件格式。');
+      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
   };
 
 
@@ -315,6 +371,20 @@ const Customers: React.FC<CustomersProps> = ({ customers, onUpdate }) => {
               <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-bold text-slate-800">客户列表</h2>
                   <div className="flex space-x-2">
+                    <input 
+                        type="file" 
+                        accept=".csv"
+                        ref={fileInputRef}
+                        onChange={handleFileChange}
+                        className="hidden"
+                    />
+                    <button 
+                        onClick={handleImportClick}
+                        className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
+                        title="导入客户"
+                    >
+                        <Upload size={20} />
+                    </button>
                     <button 
                         onClick={handleExport}
                         className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
@@ -443,22 +513,67 @@ const Customers: React.FC<CustomersProps> = ({ customers, onUpdate }) => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 bg-white lg:rounded-b-2xl">
-                    <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center">
-                        <CreditCard size={20} className="mr-2 text-indigo-500"/>
-                        资产与卡包
-                    </h3>
-                    
-                    {selectedCustomer.cards.length === 0 ? (
-                        <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                            <Clock size={32} className="mx-auto text-slate-300 mb-2"/>
-                            <p className="text-slate-500">该客户暂无已购买的卡项或服务</p>
-                            <p className="text-xs text-slate-400 mt-1">请在“交易”中进行销售开单</p>
-                        </div>
-                    ) : (
-                        <div className="space-y-4">
-                            {selectedCustomer.cards.map(renderAsset)}
-                        </div>
-                    )}
+                    {/* Assets Section */}
+                    <div className="mb-8">
+                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center">
+                            <CreditCard size={20} className="mr-2 text-indigo-500"/>
+                            资产与卡包
+                        </h3>
+                        
+                        {selectedCustomer.cards.length === 0 ? (
+                            <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                <Clock size={24} className="mx-auto text-slate-300 mb-2"/>
+                                <p className="text-slate-500 text-sm">暂无已购买的卡项或服务</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {selectedCustomer.cards.map(renderAsset)}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* History Section */}
+                    <div>
+                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center">
+                            <ShoppingBag size={20} className="mr-2 text-indigo-500"/>
+                            消费记录
+                        </h3>
+                        {selectedCustomerHistory.length === 0 ? (
+                             <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                <Calendar size={24} className="mx-auto text-slate-300 mb-2"/>
+                                <p className="text-slate-500 text-sm">暂无历史消费记录</p>
+                            </div>
+                        ) : (
+                            <div className="bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-slate-100 text-slate-500 font-medium">
+                                        <tr>
+                                            <th className="px-4 py-3">时间</th>
+                                            <th className="px-4 py-3">商品/项目</th>
+                                            <th className="px-4 py-3 text-right">金额</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-200">
+                                        {selectedCustomerHistory.map(t => (
+                                            <tr key={t.id} className="hover:bg-slate-100 transition-colors">
+                                                <td className="px-4 py-3 text-slate-500 text-xs">
+                                                    {new Date(t.date).toLocaleDateString()} <br/>
+                                                    {new Date(t.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <div className="font-bold text-slate-700">{t.productName}</div>
+                                                    <div className="text-xs text-slate-400">数量: {t.quantity}</div>
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-medium text-slate-800">
+                                                    ¥{t.totalAmount}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
                 </div>
               </>
           ) : (

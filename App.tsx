@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import Inventory from './components/Inventory';
 import Orders from './components/Orders';
+import AIAssistant from './components/AIAssistant';
 import Customers from './components/Customers';
 import Finance from './components/Finance';
 import Settings from './components/Settings';
@@ -38,6 +39,12 @@ const App: React.FC = () => {
     refreshAllData();
   };
 
+  // Optimized for Bulk Import
+  const handleBatchAddProduct = (newProducts: Product[]) => {
+    StorageService.batchSaveProducts(newProducts);
+    refreshAllData();
+  };
+
   const handleDeleteProduct = (id: string) => {
     if (confirm('确定要删除这个商品吗？')) {
       StorageService.deleteProduct(id);
@@ -47,6 +54,12 @@ const App: React.FC = () => {
 
   const handleOrder = (transaction: Transaction) => {
     StorageService.addTransaction(transaction);
+    refreshAllData();
+  };
+
+  // Optimized for Bulk Import
+  const handleBatchAddTransaction = (newTransactions: Transaction[]) => {
+    StorageService.batchAddTransactions(newTransactions);
     refreshAllData();
   };
 
@@ -63,15 +76,37 @@ const App: React.FC = () => {
       case 'dashboard':
         return <Dashboard products={products} transactions={transactions} onNavigate={handleNavigate} />;
       case 'inventory':
-        return <Inventory products={products} onAddProduct={handleAddProduct} onDeleteProduct={handleDeleteProduct} initialFilter={inventoryFilter} />;
+        return <Inventory 
+          products={products} 
+          onAddProduct={handleAddProduct} 
+          onBatchAddProduct={handleBatchAddProduct}
+          onDeleteProduct={handleDeleteProduct} 
+          initialFilter={inventoryFilter} 
+        />;
       case 'sales':
-        return <Orders type={TransactionType.SALE} products={products} transactions={transactions} customers={customers} onSubmitOrder={handleOrder} />;
+        return <Orders 
+          type={TransactionType.SALE} 
+          products={products} 
+          transactions={transactions} 
+          customers={customers} 
+          onSubmitOrder={handleOrder} 
+          onBatchSubmitOrder={handleBatchAddTransaction}
+        />;
       case 'purchase':
-        return <Orders type={TransactionType.PURCHASE} products={products} transactions={transactions} customers={customers} onSubmitOrder={handleOrder} />;
+        return <Orders 
+          type={TransactionType.PURCHASE} 
+          products={products} 
+          transactions={transactions} 
+          customers={customers} 
+          onSubmitOrder={handleOrder} 
+          onBatchSubmitOrder={handleBatchAddTransaction}
+        />;
       case 'customers':
-        return <Customers customers={customers} onUpdate={refreshAllData} />;
+        return <Customers customers={customers} transactions={transactions} onUpdate={refreshAllData} />;
       case 'finance':
         return <Finance financeRecords={financeRecords} transactions={transactions} onUpdate={refreshAllData} />;
+      case 'ai-insight':
+        return <AIAssistant products={products} transactions={transactions} />;
       case 'settings':
         return <Settings onDataRestored={refreshAllData} />;
       default:

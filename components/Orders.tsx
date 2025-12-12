@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Product, Transaction, TransactionType, Customer } from '../types';
-import { ShoppingCart, TrendingUp, CheckCircle, Search, Clock, User, PlusCircle, Download, ScanBarcode, X } from 'lucide-react';
-import { exportToCSV } from '../utils/csvExport';
+import { ShoppingCart, TrendingUp, CheckCircle, Search, Clock, User, PlusCircle, Download, ScanBarcode, X, Upload, ChevronDown, UserPlus, Phone } from 'lucide-react';
+import { exportToCSV, parseCSV } from '../utils/csvExport';
+import { StorageService } from '../services/storage';
 // @ts-ignore
 import { Html5Qrcode } from "html5-qrcode";
 
@@ -11,15 +12,141 @@ interface OrdersProps {
   transactions: Transaction[];
   customers: Customer[]; // Pass customers
   onSubmitOrder: (t: Transaction) => void;
+  onBatchSubmitOrder: (ts: Transaction[]) => void;
 }
 
-const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers, onSubmitOrder }) => {
+interface AutocompleteOption {
+  id: string;
+  label: string;
+  subLabel?: string;
+  searchText: string;
+}
+
+const AutocompleteSelect = ({ 
+  options, 
+  value, 
+  onChange, 
+  placeholder,
+  required = false
+}: { 
+  options: AutocompleteOption[], 
+  value: string, 
+  onChange: (val: string) => void, 
+  placeholder: string,
+  required?: boolean
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Sync internal search state when external value changes
+  useEffect(() => {
+    const selected = options.find(o => o.id === value);
+    if (selected) {
+      setSearch(selected.label);
+    } else if (!value) {
+      setSearch('');
+    }
+  }, [value, options]);
+
+  // Click outside to close
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+        // If nothing selected (value is empty) but text exists, reset text
+        const selected = options.find(o => o.id === value);
+        if (selected) {
+             setSearch(selected.label);
+        } else {
+             setSearch('');
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [value, options]);
+
+  const filtered = useMemo(() => {
+      if (!search) return options;
+      const lower = search.toLowerCase();
+      return options.filter(o => o.searchText.toLowerCase().includes(lower));
+  }, [options, search]);
+
+  const handleSelect = (id: string) => {
+      onChange(id);
+      setIsOpen(false);
+  };
+
+  return (
+    <div className="relative" ref={containerRef}>
+       <div className="relative">
+          <input
+            type="text"
+            required={required && !value} // Only required if no value selected
+            className="w-full border border-slate-300 rounded-lg p-3 pl-10 pr-8 bg-white focus:ring-2 focus:ring-indigo-500 text-sm md:text-base transition-shadow"
+            placeholder={placeholder}
+            value={search}
+            onChange={e => {
+                setSearch(e.target.value);
+                setIsOpen(true);
+                if (value) onChange(''); // Reset selection if typing
+            }}
+            onFocus={() => setIsOpen(true)}
+          />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          {value ? (
+            <button
+                type="button"
+                onClick={() => { onChange(''); setSearch(''); setIsOpen(true); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 bg-white"
+            >
+                <X size={16} />
+            </button>
+          ) : (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+               <ChevronDown size={14} />
+            </div>
+          )}
+       </div>
+
+       {isOpen && (
+         <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
+            {filtered.length > 0 ? (
+                <ul>
+                    {filtered.map(opt => (
+                        <li 
+                            key={opt.id}
+                            onClick={() => handleSelect(opt.id)}
+                            className={`px-4 py-3 cursor-pointer border-b border-slate-50 last:border-none flex flex-col ${opt.id === value ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
+                        >
+                            <span className="font-medium text-slate-800 text-sm">{opt.label}</span>
+                            {opt.subLabel && <span className="text-xs text-slate-400 mt-0.5">{opt.subLabel}</span>}
+                        </li>
+                    ))}
+                </ul>
+            ) : (
+                <div className="p-4 text-center text-slate-400 text-sm">无匹配结果</div>
+            )}
+         </div>
+       )}
+    </div>
+  );
+};
+
+const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers, onSubmitOrder, onBatchSubmitOrder }) => {
   const isSale = type === TransactionType.SALE;
   const [selectedProductId, setSelectedProductId] = useState('');
   const [quantity, setQuantity] = useState(1);
-  const [partyName, setPartyName] = useState(''); // Text input for Purchase or fallback
-  const [selectedCustomerId, setSelectedCustomerId] = useState(''); // Dropdown for Sale
+  const [partyName, setPartyName] = useState(''); // Generic Input (Supplier Name)
+  
+  // Sales specific states
+  const [selectedCustomerId, setSelectedCustomerId] = useState(''); 
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
+
   const [filterTerm, setFilterTerm] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Scanner state
   const [isScanning, setIsScanning] = useState(false);
@@ -30,17 +157,30 @@ const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers
     ? (isSale ? selectedProduct.price : selectedProduct.cost) * quantity 
     : 0;
 
+  // Prepare Options for Autocomplete
+  const productOptions = useMemo(() => products.map(p => ({
+    id: p.id,
+    label: p.name,
+    subLabel: `${p.sku} | ${p.type !== 'GOODS' ? '服务/卡项' : `库存: ${p.stock}`}`,
+    searchText: `${p.name} ${p.sku}`
+  })), [products]);
+
+  const customerOptions = useMemo(() => customers.map(c => ({
+    id: c.id,
+    label: c.name,
+    subLabel: c.phone,
+    searchText: `${c.name} ${c.phone}`
+  })), [customers]);
+
   // --- Scanner Logic ---
   const startScanning = () => {
       setIsScanning(true);
       setTimeout(() => {
           if (!document.getElementById("reader")) return;
           
-          // Use experimental feature for native barcode detection (much faster on mobile)
           const html5QrCode = new Html5Qrcode("reader", { experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
           scannerRef.current = html5QrCode;
 
-          // Wider box for 1D barcodes
           const config = { 
               fps: 15, 
               qrbox: { width: 300, height: 150 }, 
@@ -52,12 +192,9 @@ const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers
               { facingMode: "environment" },
               config,
               (decodedText: string) => {
-                  // Success callback
                   handleScanSuccess(decodedText);
               },
-              (errorMessage: any) => {
-                  // ignore errors during scanning
-              }
+              (errorMessage: any) => { }
           ).catch((err: any) => {
               console.error("Camera start failed", err);
               alert("无法启动相机，请确保已授予相机权限。");
@@ -84,28 +221,19 @@ const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers
   };
 
   const handleScanSuccess = (decodedText: string) => {
-      // Try to find product by SKU or ID matching the barcode
       const found = products.find(p => p.sku === decodedText || p.id === decodedText || p.name === decodedText);
       
       if (found) {
           setSelectedProductId(found.id);
-          // Play a beep sound
           const audio = new Audio('https://www.soundjay.com/buttons/sounds/button-3.mp3'); 
           audio.play().catch(e => {}); 
-          
           stopScanning();
       } else {
-          // Visual feedback for scan but not found? 
-          // For now just alert or maybe toast. Alert blocks UI so use carefuly.
-          // To prevent infinite loop of alerts, we might check if we just alerted.
-          // For simplicity, we just log or could show a temporary message overlay.
-          console.log(`Scanned ${decodedText} but product not found.`);
           alert(`扫码成功，但未找到匹配商品 (条码: ${decodedText})`);
-          stopScanning(); // Stop to let user decide
+          stopScanning();
       }
   };
 
-  // Cleanup scanner on unmount
   useEffect(() => {
       return () => {
           if (scannerRef.current && isScanning) {
@@ -119,19 +247,47 @@ const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers
     e.preventDefault();
     if (!selectedProduct) return;
 
-    // Stock check only for GOODS
+    // Stock check
     if (isSale && selectedProduct.type === 'GOODS' && selectedProduct.stock < quantity) {
       alert('库存不足，无法销售！');
       return;
     }
 
-    // Determine Party Name
-    let finalPartyName = partyName;
-    if (isSale && selectedCustomerId) {
-        const c = customers.find(cust => cust.id === selectedCustomerId);
-        if (c) finalPartyName = c.name;
+    // Determine Party Info
+    let finalPartyId = selectedCustomerId;
+    let finalPartyName = partyName; // default for purchase
+
+    // Logic for Sales
+    if (isSale) {
+        if (selectedCustomerId) {
+            // Existing customer
+            const c = customers.find(cust => cust.id === selectedCustomerId);
+            finalPartyName = c ? c.name : '未知客户';
+        } else if (newCustomerName) {
+            // Create New Customer Logic
+            const newCustomer: Customer = {
+                id: Date.now().toString(),
+                name: newCustomerName,
+                phone: newCustomerPhone,
+                cards: [],
+                notes: '交易时自动创建',
+                lastActivity: new Date().toISOString()
+            };
+            
+            // Save immediately
+            StorageService.saveCustomer(newCustomer);
+            
+            finalPartyId = newCustomer.id;
+            finalPartyName = newCustomer.name;
+        } else {
+            // Truly Walk-in
+            finalPartyName = '散客';
+            finalPartyId = ''; // No ID means no card tracking
+        }
+    } else {
+        // Purchase
+        if (!finalPartyName) finalPartyName = '供应商';
     }
-    if (!finalPartyName) finalPartyName = isSale ? '散客' : '供应商';
 
     const newTransaction: Transaction = {
       id: Date.now().toString(),
@@ -142,17 +298,24 @@ const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers
       quantity: quantity,
       totalAmount: totalAmount,
       partyName: finalPartyName,
-      partyId: selectedCustomerId || undefined, // Important: Link to customer for Card issuing
-      costSnapshot: selectedProduct.cost * quantity // Record cost for profit calc
+      partyId: finalPartyId || undefined, 
+      costSnapshot: selectedProduct.cost * quantity 
     };
 
     onSubmitOrder(newTransaction);
-    // Reset
+    
+    // Reset Form
     setSelectedProductId('');
     setQuantity(1);
     setPartyName('');
     setSelectedCustomerId('');
-    alert(isSale ? '销售单已生成！(如含卡项已自动发放)' : '采购单已生成！');
+    setNewCustomerName('');
+    setNewCustomerPhone('');
+
+    const successMsg = isSale 
+        ? (newCustomerName ? `已自动创建客户“${newCustomerName}”并生成销售单！` : '销售单已生成！') 
+        : '采购单已生成！';
+    alert(successMsg);
   };
 
   const filteredTransactions = transactions
@@ -165,9 +328,12 @@ const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers
 
   const handleExport = () => {
     const dataToExport = filteredTransactions.map(t => ({
-      ...t,
       dateFormatted: new Date(t.date).toLocaleString('zh-CN'),
       typeFormatted: t.type === TransactionType.SALE ? '销售' : '进货',
+      productName: t.productName,
+      partyName: t.partyName,
+      quantity: t.quantity,
+      totalAmount: t.totalAmount
     }));
     
     const headers = [
@@ -180,6 +346,65 @@ const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers
     ];
 
     exportToCSV(dataToExport, headers, isSale ? '销售记录' : '采购记录');
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const parsed = parseCSV(text);
+        if (parsed.length === 0) { alert('文件为空'); return; }
+
+        const newTransactions: Transaction[] = [];
+        let errors = 0;
+
+        parsed.forEach((row: any) => {
+            const pName = row['商品名称'] || row['productName'];
+            const qty = Number(row['数量'] || row['quantity'] || 0);
+            const amt = Number(row['总金额'] || row['totalAmount'] || 0);
+            const product = products.find(p => p.name === pName || p.sku === pName);
+
+            if (pName && qty > 0) {
+                 newTransactions.push({
+                    id: Date.now().toString() + Math.random().toString().slice(2,6),
+                    date: row['时间'] ? new Date(row['时间']).toISOString() : new Date().toISOString(),
+                    type: type,
+                    productId: product?.id,
+                    productName: pName,
+                    quantity: qty,
+                    totalAmount: amt || (product ? (isSale ? product.price : product.cost) * qty : 0),
+                    partyName: row['对方名称'] || row['partyName'] || (isSale ? '散客' : '供应商'),
+                    costSnapshot: product ? product.cost * qty : 0 
+                 });
+            } else {
+                errors++;
+            }
+        });
+
+        if (newTransactions.length > 0) {
+            if (confirm(`解析到 ${newTransactions.length} 条有效记录，确定导入吗？`)) {
+                onBatchSubmitOrder(newTransactions);
+                alert('导入成功，库存已更新。');
+            }
+        } else {
+            alert('未找到有效数据，请检查CSV格式：商品名称,数量,总金额,对方名称...');
+        }
+
+      } catch (err) {
+        console.error(err);
+        alert('导入失败，文件格式错误');
+      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -200,22 +425,13 @@ const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers
               <label className="block text-sm font-medium text-slate-700 mb-1">选择商品/服务</label>
               <div className="flex space-x-2">
                   <div className="relative flex-1">
-                    <select 
-                      required
-                      className="w-full border border-slate-300 rounded-lg p-3 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 appearance-none text-sm md:text-base"
-                      value={selectedProductId}
-                      onChange={e => setSelectedProductId(e.target.value)}
-                    >
-                      <option value="">-- 点击选择 --</option>
-                      {products.map(p => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} {p.type !== 'GOODS' ? '[卡项]' : `(余: ${p.stock})`}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                       <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
-                    </div>
+                    <AutocompleteSelect 
+                        options={productOptions}
+                        value={selectedProductId}
+                        onChange={setSelectedProductId}
+                        placeholder="搜索商品名或条码..."
+                        required={true}
+                    />
                   </div>
                   <button 
                     type="button" 
@@ -231,25 +447,43 @@ const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers
             {/* Customer Selection Logic */}
             {isSale ? (
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">客户 (用于发放卡项)</label>
-                    <select 
-                        className="w-full border border-slate-300 rounded-lg p-3 bg-slate-50 text-sm"
+                    <label className="block text-sm font-medium text-slate-700 mb-1">客户</label>
+                    <AutocompleteSelect 
+                        options={customerOptions}
                         value={selectedCustomerId}
-                        onChange={e => setSelectedCustomerId(e.target.value)}
-                    >
-                        <option value="">-- 选择已有客户 --</option>
-                        {customers.map(c => (
-                            <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
-                        ))}
-                    </select>
+                        onChange={setSelectedCustomerId}
+                        placeholder="搜索选择已有客户..."
+                        required={false}
+                    />
+                    
+                    {/* New Customer Input - Shows only if no existing customer selected */}
                     {!selectedCustomerId && (
-                        <input 
-                            type="text"
-                            className="w-full border border-slate-300 rounded-lg p-3 mt-2 text-sm"
-                            placeholder="或手动输入散客姓名"
-                            value={partyName}
-                            onChange={e => setPartyName(e.target.value)}
-                        />
+                        <div className="mt-3 bg-slate-50 p-3 rounded-xl border border-slate-100 animate-in fade-in slide-in-from-top-2">
+                            <div className="flex items-center space-x-2 mb-2 text-indigo-600">
+                                <UserPlus size={16} />
+                                <span className="text-xs font-bold">新散客自动建档 (可选)</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                <input 
+                                    type="text"
+                                    className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white"
+                                    placeholder="散客姓名"
+                                    value={newCustomerName}
+                                    onChange={e => setNewCustomerName(e.target.value)}
+                                />
+                                <div className="relative">
+                                    <input 
+                                        type="text"
+                                        className="w-full border border-slate-300 rounded-lg p-2 pl-8 text-sm bg-white"
+                                        placeholder="电话号码"
+                                        value={newCustomerPhone}
+                                        onChange={e => setNewCustomerPhone(e.target.value)}
+                                    />
+                                    <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
+                                </div>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-1 ml-1">填写姓名后，系统将自动创建该客户档案。</p>
+                        </div>
                     )}
                 </div>
             ) : (
@@ -336,6 +570,20 @@ const Orders: React.FC<OrdersProps> = ({ type, products, transactions, customers
               <h3 className="font-bold text-slate-800 text-lg">历史记录</h3>
               
               <div className="flex items-center gap-2 w-full sm:w-auto">
+                <input 
+                    type="file" 
+                    accept=".csv"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    className="hidden"
+                />
+                <button 
+                    onClick={handleImportClick}
+                    className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
+                    title="导入CSV"
+                >
+                    <Upload size={18} />
+                </button>
                 <button 
                     onClick={handleExport}
                     className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"

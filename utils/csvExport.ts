@@ -39,3 +39,62 @@ export const exportToCSV = (data: any[], headers: { key: string; label: string }
   link.click();
   document.body.removeChild(link);
 };
+
+export const parseCSV = (csvText: string): any[] => {
+  // 1. Remove BOM (Byte Order Mark) if present, critical for Excel CSVs
+  const cleanText = csvText.replace(/^\ufeff/, '');
+  
+  const lines = cleanText.split(/\r\n|\n/);
+  const result: any[] = [];
+  
+  // Need at least headers and one line
+  if (lines.length < 2) return [];
+
+  // 2. Clean headers (remove extra quotes and whitespace)
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    const values: string[] = [];
+    let currentVal = '';
+    let inQuotes = false;
+
+    for (let j = 0; j < line.length; j++) {
+      const char = line[j];
+      if (char === '"') {
+        if (inQuotes && line[j + 1] === '"') {
+          currentVal += '"';
+          j++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        values.push(currentVal);
+        currentVal = '';
+      } else {
+        currentVal += char;
+      }
+    }
+    values.push(currentVal);
+
+    const obj: any = {};
+    // Map values to headers
+    headers.forEach((h, idx) => {
+      // Clean quotes from value if present
+      let val = values[idx]?.trim() || '';
+      if (val.startsWith('"') && val.endsWith('"')) {
+          val = val.slice(1, -1);
+      }
+      val = val.replace(/""/g, '"');
+      obj[h] = val;
+    });
+    
+    // Only push if object is not effectively empty
+    if (Object.keys(obj).length > 0) {
+        result.push(obj);
+    }
+  }
+  return result;
+};

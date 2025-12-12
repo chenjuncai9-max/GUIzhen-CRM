@@ -38,6 +38,16 @@ export const StorageService = {
     else products.push(product);
     localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(products));
   },
+  batchSaveProducts: (newProducts: Product[]): void => {
+    const products = StorageService.getProducts();
+    // Merge new products, overwrite if ID exists (though import usually creates new IDs)
+    newProducts.forEach(np => {
+        const index = products.findIndex(p => p.id === np.id);
+        if (index >= 0) products[index] = np;
+        else products.push(np);
+    });
+    localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(products));
+  },
   deleteProduct: (id: string): void => {
      const products = StorageService.getProducts().filter(p => p.id !== id);
      localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(products));
@@ -52,6 +62,11 @@ export const StorageService = {
     const index = customers.findIndex(c => c.id === customer.id);
     if (index >= 0) customers[index] = customer;
     else customers.push(customer);
+    localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(customers));
+  },
+  batchSaveCustomers: (newCustomers: Customer[]): void => {
+    const customers = StorageService.getCustomers();
+    newCustomers.forEach(nc => customers.push(nc));
     localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(customers));
   },
   deleteCustomer: (id: string): void => {
@@ -163,6 +178,30 @@ export const StorageService = {
         }
     }
   },
+  batchAddTransactions: (newTransactions: Transaction[]): void => {
+      const transactions = StorageService.getTransactions();
+      const products = StorageService.getProducts();
+      
+      // Add all new transactions
+      newTransactions.forEach(t => transactions.unshift(t));
+      
+      // Update stock for all involved products
+      newTransactions.forEach(t => {
+          if (t.productId) {
+              const pIndex = products.findIndex(p => p.id === t.productId);
+              if (pIndex >= 0) {
+                  const product = products[pIndex];
+                  if (product.type === ProductType.GOODS) {
+                     if (t.type === TransactionType.PURCHASE) product.stock += (t.quantity || 0);
+                     else product.stock -= (t.quantity || 0);
+                  }
+              }
+          }
+      });
+      
+      localStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(transactions));
+      localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(products));
+  },
 
   // Finance
   getFinanceRecords: (): FinanceRecord[] => {
@@ -171,6 +210,11 @@ export const StorageService = {
   addFinanceRecord: (record: FinanceRecord): void => {
       const records = StorageService.getFinanceRecords();
       records.unshift(record);
+      localStorage.setItem(KEYS.FINANCE, JSON.stringify(records));
+  },
+  batchAddFinanceRecords: (newRecords: FinanceRecord[]): void => {
+      const records = StorageService.getFinanceRecords();
+      newRecords.forEach(r => records.unshift(r));
       localStorage.setItem(KEYS.FINANCE, JSON.stringify(records));
   },
   deleteFinanceRecord: (id: string): void => {
