@@ -7,11 +7,15 @@ import AIAssistant from './components/AIAssistant';
 import Customers from './components/Customers';
 import Finance from './components/Finance';
 import Settings from './components/Settings';
+import LoginPage from './components/LoginPage';
 import { StorageService } from './services/storage';
 import { Product, Transaction, TransactionType, Customer, FinanceRecord } from './types';
-import { Bell, User, LayoutDashboard, Package, TrendingUp, ShoppingCart, Sparkles, Users, Wallet } from 'lucide-react';
+import { Bell, User, LayoutDashboard, Package, TrendingUp, ShoppingCart, Sparkles, Users, Wallet, LogOut } from 'lucide-react';
 
 const App: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return sessionStorage.getItem('authenticated') === 'true';
+  });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -114,6 +118,15 @@ const App: React.FC = () => {
     }
   };
 
+  const handleLogout = () => {
+    sessionStorage.removeItem('authenticated');
+    setIsAuthenticated(false);
+  };
+
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
+  }
+
   const navItems = [
     { id: 'dashboard', label: '总览', icon: LayoutDashboard },
     { id: 'sales', label: '交易', icon: TrendingUp },
@@ -148,7 +161,7 @@ const App: React.FC = () => {
                 <Bell size={20} />
                 <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
               </button>
-              <div 
+              <div
                 className="flex items-center space-x-2 md:space-x-3 pl-4 md:pl-6 border-l border-slate-100 cursor-pointer group"
                 onClick={() => setActiveTab('settings')}
                 title="系统设置"
@@ -158,6 +171,13 @@ const App: React.FC = () => {
                  </div>
                  <span className="hidden md:inline text-sm font-medium text-slate-700">管理员</span>
               </div>
+              <button
+                onClick={handleLogout}
+                className="text-slate-400 hover:text-red-500 transition-colors"
+                title="退出登录"
+              >
+                <LogOut size={20} />
+              </button>
            </div>
         </header>
 
