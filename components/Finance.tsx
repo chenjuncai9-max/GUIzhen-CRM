@@ -57,8 +57,7 @@ const Finance: React.FC<FinanceProps> = ({ financeRecords, transactions, onUpdat
         onUpdate();
         setAmount('');
         setDescription('');
-        // Reset date to today after submit
-        setRecordDate(new Date().toISOString().split('T')[0]);
+        // 优化：提交后不重置日期，方便用户连续录入同一天的记录
     };
 
     const handleDelete = async (id: string) => {
