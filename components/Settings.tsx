@@ -137,8 +137,8 @@ const Settings: React.FC<SettingsProps> = ({ onDataRestored }) => {
       </div>
 
       <div className="text-center text-slate-400 text-xs mt-12 pb-8">
-        <p>贵蓁供销存 v2.0.0 (Cloud Native)</p>
-        <p className="mt-1 opacity-60">数据由 Supabase 强力驱动</p>
+        <p>贵蓁供销存 v3.0.0 (Netlify Cloud)</p>
+        <p className="mt-1 opacity-60">数据由 Netlify Blobs 强力驱动</p>
       </div>
     </div>
   );

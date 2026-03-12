@@ -27,18 +27,18 @@ const App: React.FC = () => {
 
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error'>('idle');
 
-  // Load initial data and setup subscription
+  // 加载初始数据并启动轮询同步
   useEffect(() => {
     refreshAllData();
 
-    // Setup Realtime Subscription
-    const subscription = CloudStorageService.subscribeToChanges(() => {
-      // When cloud data changes (from other clients or self), refresh local state
+    // 启动轮询（每 5 秒检查版本号变化）
+    const stopPolling = CloudStorageService.startPolling(() => {
+      // 检测到云端数据变化，刷新本地状态
       refreshAllData(true);
     });
 
     return () => {
-      subscription.unsubscribe();
+      stopPolling();
     };
   }, []);
 

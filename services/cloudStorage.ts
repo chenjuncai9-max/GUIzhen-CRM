@@ -1,366 +1,333 @@
-import { supabase } from './supabaseClient';
-import { Product, Transaction, Customer, FinanceRecord, CustomerCard, ProductType } from '../types';
+import { Product, Transaction, Customer, FinanceRecord, ProductType } from '../types';
 
+// Netlify Function 的 API 端点（开发环境和生产环境均通过相对路径访问）
+const API_BASE = '/.netlify/functions/sync';
+
+/**
+ * 通用 API 请求方法
+ */
+async function apiRequest<T = any>(
+  method: 'GET' | 'PUT' | 'DELETE',
+  params: Record<string, string>,
+  body?: any
+): Promise<T> {
+  const url = new URL(API_BASE, window.location.origin);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+
+  const options: RequestInit = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+
+  if (body !== undefined && method !== 'GET') {
+    options.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(url.toString(), options);
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: '未知错误' }));
+    throw new Error(errorData.error || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * 云存储服务 - 基于 Netlify Functions + Blobs
+ */
 export const CloudStorageService = {
-    // --- Products ---
-    getProducts: async (): Promise<Product[]> => {
-        const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-        if (error) {
-            console.error('Error fetching products:', error);
-            return [];
-        }
-        return (data || []).map(p => ({
-            id: p.id,
-            name: p.name,
-            category: p.category,
-            sku: p.sku,
-            price: p.price,
-            cost: p.cost,
-            stock: p.stock,
-            minStockLevel: p.minstocklevel, // Map DB lowercase 'minstocklevel' back to camelCase
-            type: p.type as ProductType,
-            value: p.value
-        }));
-    },
-
-    saveProduct: async (product: Product): Promise<void> => {
-        const productData = {
-            id: product.id,
-            name: product.name,
-            category: product.category,
-            sku: product.sku,
-            price: product.price,
-            cost: product.cost,
-            stock: product.stock,
-            minstocklevel: product.minStockLevel,
-            type: product.type,
-            value: product.value
-        };
-        const { error } = await supabase.from('products').upsert(productData);
-        if (error) console.error('Error saving product:', error);
-    },
-
-    deleteProduct: async (id: string): Promise<void> => {
-        const { error } = await supabase.from('products').delete().eq('id', id);
-        if (error) console.error('Error deleting product:', error);
-    },
-
-    batchSaveProducts: async (newProducts: Product[]): Promise<void> => {
-        const productsData = newProducts.map(product => ({
-            id: product.id,
-            name: product.name,
-            category: product.category,
-            sku: product.sku,
-            price: product.price,
-            cost: product.cost,
-            stock: product.stock,
-            minstocklevel: product.minStockLevel,
-            type: product.type,
-            value: product.value
-        }));
-        const { error } = await supabase.from('products').upsert(productsData);
-        if (error) console.error('Error batch saving products:', error);
-    },
-
-    // --- Customers ---
-    getCustomers: async (): Promise<Customer[]> => {
-        const { data: customersData, error: customersError } = await supabase.from('customers').select('*');
-        if (customersError) {
-            console.error('Error fetching customers:', customersError);
-            return [];
-        }
-
-        const { data: cardsData, error: cardsError } = await supabase.from('customer_cards').select('*');
-        if (cardsError) {
-            console.error('Error fetching customer cards:', cardsError);
-            return [];
-        }
-
-        // Merge cards into customers
-        const customers = customersData || [];
-        const cards = cardsData || [];
-
-        return customers.map(c => ({
-            id: c.id,
-            name: c.name,
-            phone: c.phone,
-            notes: c.notes,
-            lastActivity: c.lastactivity || c.lastActivity, // Map DB to TS
-            cards: cards.filter(card => card.customer_id === c.id).map(card => ({
-                id: card.id,
-                productId: card.productid,
-                productName: card.productname,
-                type: card.type,
-                remainingCounts: card.remainingcounts,
-                expiryDate: card.expirydate,
-                purchaseDate: card.purchasedate
-            }))
-        }));
-    },
-
-    saveCustomer: async (customer: Customer): Promise<void> => {
-        // 1. Save customer basic info - Map TS camelCase to DB snake_case
-        const customerData = {
-            id: customer.id,
-            name: customer.name,
-            phone: customer.phone,
-            notes: customer.notes,
-            lastactivity: customer.lastActivity // Map to DB lowercase
-        };
-
-        const { error: customerError } = await supabase.from('customers').upsert(customerData);
-        if (customerError) {
-            console.error('Error saving customer:', customerError);
-            return;
-        }
-
-        // 2. Save customer cards - Map TS camelCase to DB snake_case
-        // The previous implementation replaced all cards when saving. Here we upsert existing cards.
-        // However, if a card was deleted, an upsert won't remove it. For simplicity in this CRM, 
-        // cards are typically only added or updated (usage).
-        if (customer.cards && customer.cards.length > 0) {
-            const cardsToUpsert = customer.cards.map(card => ({
-                id: card.id,
-                customer_id: customer.id,
-                productid: card.productId,
-                productname: card.productName,
-                type: card.type,
-                remainingcounts: card.remainingCounts || 0,
-                expirydate: card.expiryDate,
-                purchasedate: card.purchaseDate || new Date().toISOString()
-            }));
-            const { error: cardsError } = await supabase.from('customer_cards').upsert(cardsToUpsert);
-            if (cardsError) console.error('Error saving customer cards:', cardsError);
-        }
-    },
-
-    batchSaveCustomers: async (newCustomers: Customer[]): Promise<void> => {
-        // Map TS camelCase to DB snake_case
-        const basicData = newCustomers.map(c => ({
-            id: c.id,
-            name: c.name,
-            phone: c.phone,
-            notes: c.notes,
-            lastactivity: c.lastActivity
-        }));
-        const { error } = await supabase.from('customers').upsert(basicData);
-        if (error) console.error('Error batch saving customers:', error);
-    },
-
-    deleteCustomer: async (id: string): Promise<void> => {
-        // Due to ON DELETE CASCADE on customer_cards, we only need to delete the customer
-        const { error } = await supabase.from('customers').delete().eq('id', id);
-        if (error) console.error('Error deleting customer:', error);
-    },
-
-    // Customer Card Logic (Issuing)
-    issueCardToCustomer: async (customerId: string, product: Product, quantity: number): Promise<void> => {
-        // 1. Update Customer Activity
-        const { error: updateError } = await supabase.from('customers').update({ lastactivity: new Date().toISOString() }).eq('id', customerId);
-        if (updateError) console.error('Error updating customer activity:', updateError);
-
-        // 2. Insert Cards - Map TS camelCase to DB snake_case
-        const newCards: any[] = [];
-        for (let i = 0; i < quantity; i++) {
-            const newCard = {
-                id: Date.now().toString() + Math.random().toString().slice(2, 6),
-                customer_id: customerId,
-                productid: product.id,
-                productname: product.name,
-                type: product.type,
-                purchasedate: new Date().toISOString(),
-                remainingcounts: product.type === ProductType.SERVICE_COUNT ? (product.value || 1) : null,
-                expirydate: null as string | null
-            };
-
-            if (product.type === ProductType.SERVICE_TIME) {
-                const days = product.value || 30;
-                const expiry = new Date();
-                expiry.setDate(expiry.getDate() + days);
-                newCard.expirydate = expiry.toISOString();
-            }
-            newCards.push(newCard);
-        }
-
-        const { error: cardsError } = await supabase.from('customer_cards').insert(newCards);
-        if (cardsError) console.error('Error inserting customer cards:', cardsError);
-    },
-
-    // Customer Card Logic (Redemption/Verifying)
-    redeemCard: async (customerId: string, cardId: string, quantity: number = 1): Promise<boolean> => {
-        // We first need to get the card
-        const { data: cards, error: fetchError } = await supabase.from('customer_cards').select('*').eq('id', cardId).eq('customer_id', customerId);
-        if (fetchError || !cards || cards.length === 0) return false;
-
-        const card = cards[0];
-
-        // Update customer last activity
-        await supabase.from('customers').update({ lastactivity: new Date().toISOString() }).eq('id', customerId);
-
-        if (card.type === ProductType.SERVICE_TIME) {
-            if (new Date(card.expirydate) < new Date()) return false;
-            return true;
-        } else if (card.type === ProductType.SERVICE_COUNT) {
-            const remaining = card.remainingcounts || 0;
-            if (remaining < quantity) return false;
-
-            const newRemaining = remaining - quantity;
-            const { error: updateError } = await supabase.from('customer_cards').update({ remainingcounts: newRemaining }).eq('id', cardId);
-            if (updateError) return false;
-            return true;
-        }
-        return false;
-    },
-
-    // --- Transactions ---
-    getTransactions: async (): Promise<Transaction[]> => {
-        const { data, error } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
-        if (error) {
-            console.error('Error fetching transactions:', error);
-            return [];
-        }
-        return (data || []).map(t => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            productId: t.productid,
-            productName: t.productname,
-            quantity: t.quantity,
-            totalAmount: t.totalamount,
-            partyName: t.partyname,
-            partyId: t.partyid,
-            costSnapshot: t.costsnapshot
-        }));
-    },
-
-    addTransaction: async (transaction: Transaction): Promise<void> => {
-        const txData = {
-            id: transaction.id,
-            date: transaction.date,
-            type: transaction.type,
-            productid: transaction.productId,
-            productname: transaction.productName,
-            quantity: transaction.quantity,
-            totalamount: transaction.totalAmount,
-            partyname: transaction.partyName,
-            partyid: transaction.partyId,
-            costsnapshot: transaction.costSnapshot
-        };
-        const { error } = await supabase.from('transactions').insert(txData);
-        if (error) console.error('Error adding transaction:', error);
-
-        // Update Product Stock if applicable
-        if (transaction.productId) {
-            const { data: products } = await supabase.from('products').select('*').eq('id', transaction.productId);
-            if (products && products.length > 0) {
-                const product = products[0];
-                if (product.type === ProductType.GOODS) {
-                    const stockChange = transaction.type === 'PURCHASE' ? (transaction.quantity || 0) : -(transaction.quantity || 0);
-                    await supabase.from('products').update({ stock: product.stock + stockChange }).eq('id', product.id);
-                }
-
-                // Issue Service Card
-                if (transaction.type === 'SALE' && transaction.partyId && (product.type === ProductType.SERVICE_COUNT || product.type === ProductType.SERVICE_TIME)) {
-                    await CloudStorageService.issueCardToCustomer(transaction.partyId, product, transaction.quantity || 1);
-                }
-            }
-        }
-    },
-
-    batchAddTransactions: async (newTransactions: Transaction[]): Promise<void> => {
-        const txData = newTransactions.map(transaction => ({
-            id: transaction.id,
-            date: transaction.date,
-            type: transaction.type,
-            productid: transaction.productId,
-            productname: transaction.productName,
-            quantity: transaction.quantity,
-            totalamount: transaction.totalAmount,
-            partyname: transaction.partyName,
-            partyid: transaction.partyId,
-            costsnapshot: transaction.costSnapshot
-        }));
-        // insert transactions
-        const { error } = await supabase.from('transactions').insert(txData);
-        if (error) console.error('Error batch adding transactions', error);
-
-        // NOTE: A more complex query or edge function is better here for batch stock updates.
-        // For standard local-first iteration, we process sequentially or rely on Realtime sync later.
-        for (const t of newTransactions) {
-            if (t.productId) {
-                const { data: products } = await supabase.from('products').select('*').eq('id', t.productId);
-                if (products && products.length > 0 && products[0].type === ProductType.GOODS) {
-                    const stockChange = t.type === 'PURCHASE' ? (t.quantity || 0) : -(t.quantity || 0);
-                    await supabase.from('products').update({ stock: products[0].stock + stockChange }).eq('id', t.productId);
-                }
-            }
-        }
-    },
-
-    // --- Finance Records ---
-    getFinanceRecords: async (): Promise<FinanceRecord[]> => {
-        const { data, error } = await supabase.from('finance_records').select('*').order('created_at', { ascending: false });
-        if (error) {
-            console.error('Error fetching finance records:', error);
-            return [];
-        }
-        return (data || []).map(r => ({
-            id: r.id,
-            date: r.date,
-            type: r.type,
-            amount: r.amount,
-            category: r.category,
-            description: r.description
-        }));
-    },
-
-    addFinanceRecord: async (record: FinanceRecord): Promise<void> => {
-        const { error } = await supabase.from('finance_records').insert(record);
-        if (error) console.error('Error adding finance record:', error);
-    },
-
-    deleteFinanceRecord: async (id: string): Promise<void> => {
-        const { error } = await supabase.from('finance_records').delete().eq('id', id);
-        if (error) console.error('Error deleting finance record:', error);
-    },
-
-    batchAddFinanceRecords: async (newRecords: FinanceRecord[]): Promise<void> => {
-        const { error } = await supabase.from('finance_records').insert(newRecords);
-        if (error) console.error('Error batch adding finance records', error);
-    },
-
-    // --- Realtime Subscriptions ---
-    subscribeToChanges: (onDataChange: () => void) => {
-        const channel = supabase.channel('schema-db-changes')
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'products' },
-                () => onDataChange()
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'customers' },
-                () => onDataChange()
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'customer_cards' },
-                () => onDataChange()
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'transactions' },
-                () => onDataChange()
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'finance_records' },
-                () => onDataChange()
-            )
-            .subscribe((status) => {
-                console.log('Supabase real-time status:', status);
-            });
-
-        return channel;
+  // === 商品 ===
+  getProducts: async (): Promise<Product[]> => {
+    try {
+      return await apiRequest<Product[]>('GET', { store: 'products' });
+    } catch (error) {
+      console.error('获取商品失败:', error);
+      return [];
     }
+  },
+
+  saveProduct: async (product: Product): Promise<void> => {
+    try {
+      await apiRequest('PUT', { store: 'products', mode: 'upsert' }, [product]);
+    } catch (error) {
+      console.error('保存商品失败:', error);
+    }
+  },
+
+  deleteProduct: async (id: string): Promise<void> => {
+    try {
+      await apiRequest('DELETE', { store: 'products', id });
+    } catch (error) {
+      console.error('删除商品失败:', error);
+    }
+  },
+
+  batchSaveProducts: async (newProducts: Product[]): Promise<void> => {
+    try {
+      await apiRequest('PUT', { store: 'products', mode: 'upsert' }, newProducts);
+    } catch (error) {
+      console.error('批量保存商品失败:', error);
+    }
+  },
+
+  // === 客户 ===
+  getCustomers: async (): Promise<Customer[]> => {
+    try {
+      return await apiRequest<Customer[]>('GET', { store: 'customers' });
+    } catch (error) {
+      console.error('获取客户失败:', error);
+      return [];
+    }
+  },
+
+  saveCustomer: async (customer: Customer): Promise<void> => {
+    try {
+      await apiRequest('PUT', { store: 'customers', mode: 'upsert' }, [customer]);
+    } catch (error) {
+      console.error('保存客户失败:', error);
+    }
+  },
+
+  batchSaveCustomers: async (newCustomers: Customer[]): Promise<void> => {
+    try {
+      await apiRequest('PUT', { store: 'customers', mode: 'upsert' }, newCustomers);
+    } catch (error) {
+      console.error('批量保存客户失败:', error);
+    }
+  },
+
+  deleteCustomer: async (id: string): Promise<void> => {
+    try {
+      // 同时删除客户和其关联的卡片（在 Blob 存储中客户数据包含 cards）
+      await apiRequest('DELETE', { store: 'customers', id });
+    } catch (error) {
+      console.error('删除客户失败:', error);
+    }
+  },
+
+  // 客户卡片发放
+  issueCardToCustomer: async (customerId: string, product: Product, quantity: number): Promise<void> => {
+    try {
+      // 1. 获取当前客户列表
+      const customers = await CloudStorageService.getCustomers();
+      const customer = customers.find(c => c.id === customerId);
+      if (!customer) return;
+
+      // 2. 更新活动时间
+      customer.lastActivity = new Date().toISOString();
+
+      // 3. 创建新卡片
+      for (let i = 0; i < quantity; i++) {
+        const newCard: any = {
+          id: Date.now().toString() + Math.random().toString().slice(2, 6),
+          productId: product.id,
+          productName: product.name,
+          type: product.type,
+          purchaseDate: new Date().toISOString(),
+        };
+
+        if (product.type === ProductType.SERVICE_COUNT) {
+          newCard.remainingCounts = product.value || 1;
+        } else if (product.type === ProductType.SERVICE_TIME) {
+          const days = product.value || 30;
+          const expiry = new Date();
+          expiry.setDate(expiry.getDate() + days);
+          newCard.expiryDate = expiry.toISOString();
+        }
+
+        customer.cards.push(newCard);
+      }
+
+      // 4. 保存更新后的客户
+      await CloudStorageService.saveCustomer(customer);
+    } catch (error) {
+      console.error('发放卡片失败:', error);
+    }
+  },
+
+  // 客户卡片核销
+  redeemCard: async (customerId: string, cardId: string, quantity: number = 1): Promise<boolean> => {
+    try {
+      const customers = await CloudStorageService.getCustomers();
+      const customer = customers.find(c => c.id === customerId);
+      if (!customer) return false;
+
+      const card = customer.cards.find(c => c.id === cardId);
+      if (!card) return false;
+
+      // 更新活动时间
+      customer.lastActivity = new Date().toISOString();
+
+      if (card.type === ProductType.SERVICE_TIME) {
+        if (new Date(card.expiryDate!) < new Date()) return false;
+        await CloudStorageService.saveCustomer(customer);
+        return true;
+      } else if (card.type === ProductType.SERVICE_COUNT) {
+        const remaining = card.remainingCounts || 0;
+        if (remaining < quantity) return false;
+        card.remainingCounts = remaining - quantity;
+        await CloudStorageService.saveCustomer(customer);
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('核销卡片失败:', error);
+      return false;
+    }
+  },
+
+  // === 交易 ===
+  getTransactions: async (): Promise<Transaction[]> => {
+    try {
+      return await apiRequest<Transaction[]>('GET', { store: 'transactions' });
+    } catch (error) {
+      console.error('获取交易记录失败:', error);
+      return [];
+    }
+  },
+
+  addTransaction: async (transaction: Transaction): Promise<void> => {
+    try {
+      // 1. 添加交易记录
+      const transactions = await CloudStorageService.getTransactions();
+      transactions.unshift(transaction);
+      await apiRequest('PUT', { store: 'transactions' }, transactions);
+
+      // 2. 更新库存
+      if (transaction.productId) {
+        const products = await CloudStorageService.getProducts();
+        const product = products.find(p => p.id === transaction.productId);
+        if (product && product.type === ProductType.GOODS) {
+          const stockChange = transaction.type === 'PURCHASE'
+            ? (transaction.quantity || 0)
+            : -(transaction.quantity || 0);
+          product.stock += stockChange;
+          await CloudStorageService.saveProduct(product);
+        }
+
+        // 3. 如果是服务销售，发放卡片
+        if (
+          transaction.type === 'SALE' &&
+          transaction.partyId &&
+          product &&
+          (product.type === ProductType.SERVICE_COUNT || product.type === ProductType.SERVICE_TIME)
+        ) {
+          await CloudStorageService.issueCardToCustomer(
+            transaction.partyId,
+            product,
+            transaction.quantity || 1
+          );
+        }
+      }
+    } catch (error) {
+      console.error('添加交易失败:', error);
+    }
+  },
+
+  batchAddTransactions: async (newTransactions: Transaction[]): Promise<void> => {
+    try {
+      // 1. 添加交易记录
+      const existing = await CloudStorageService.getTransactions();
+      const all = [...newTransactions, ...existing];
+      await apiRequest('PUT', { store: 'transactions' }, all);
+
+      // 2. 批量更新库存
+      const products = await CloudStorageService.getProducts();
+      const productMap = new Map(products.map(p => [p.id, p]));
+
+      for (const t of newTransactions) {
+        if (t.productId) {
+          const product = productMap.get(t.productId);
+          if (product && product.type === ProductType.GOODS) {
+            const stockChange = t.type === 'PURCHASE' ? (t.quantity || 0) : -(t.quantity || 0);
+            product.stock += stockChange;
+          }
+        }
+      }
+
+      await apiRequest('PUT', { store: 'products' }, Array.from(productMap.values()));
+    } catch (error) {
+      console.error('批量添加交易失败:', error);
+    }
+  },
+
+  // === 财务 ===
+  getFinanceRecords: async (): Promise<FinanceRecord[]> => {
+    try {
+      return await apiRequest<FinanceRecord[]>('GET', { store: 'finance' });
+    } catch (error) {
+      console.error('获取财务记录失败:', error);
+      return [];
+    }
+  },
+
+  addFinanceRecord: async (record: FinanceRecord): Promise<void> => {
+    try {
+      const records = await CloudStorageService.getFinanceRecords();
+      records.unshift(record);
+      await apiRequest('PUT', { store: 'finance' }, records);
+    } catch (error) {
+      console.error('添加财务记录失败:', error);
+    }
+  },
+
+  deleteFinanceRecord: async (id: string): Promise<void> => {
+    try {
+      await apiRequest('DELETE', { store: 'finance', id });
+    } catch (error) {
+      console.error('删除财务记录失败:', error);
+    }
+  },
+
+  batchAddFinanceRecords: async (newRecords: FinanceRecord[]): Promise<void> => {
+    try {
+      const existing = await CloudStorageService.getFinanceRecords();
+      const all = [...newRecords, ...existing];
+      await apiRequest('PUT', { store: 'finance' }, all);
+    } catch (error) {
+      console.error('批量添加财务记录失败:', error);
+    }
+  },
+
+  // === 轮询同步 ===
+  /**
+   * 启动轮询，定期检查版本号变化
+   * @param onDataChange 数据变化时的回调函数
+   * @param intervalMs 轮询间隔（毫秒），默认 5000
+   * @returns 停止轮询的函数
+   */
+  startPolling: (onDataChange: () => void, intervalMs = 5000): (() => void) => {
+    let lastVersion = '0';
+    let isRunning = true;
+
+    const poll = async () => {
+      if (!isRunning) return;
+
+      try {
+        const { version } = await apiRequest<{ version: string }>('GET', { action: 'version' });
+        if (version !== lastVersion && lastVersion !== '0') {
+          // 版本号变化，触发数据刷新
+          onDataChange();
+        }
+        lastVersion = version;
+      } catch (error) {
+        // 轮询失败不中断，静默忽略
+        console.warn('轮询版本号失败:', error);
+      }
+
+      if (isRunning) {
+        setTimeout(poll, intervalMs);
+      }
+    };
+
+    // 首次轮询延迟一小段时间启动
+    setTimeout(poll, 1000);
+
+    // 返回停止函数
+    return () => {
+      isRunning = false;
+    };
+  },
 };
